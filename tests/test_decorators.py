@@ -1,12 +1,11 @@
 import asyncio
-import time
 
 import pytest
 
 from pep_scraper.decorators import rate_limit, retry
 
 
-async def test_retry_returns_after_transient_failures():
+async def test_retry_returns_after_transient_failures(retry_waits):
     calls = 0
 
     @retry(attempts=3, delay=0.01, exceptions=(ConnectionError,))
@@ -21,7 +20,7 @@ async def test_retry_returns_after_transient_failures():
     assert calls == 3
 
 
-async def test_retry_reraises_after_last_attempt():
+async def test_retry_reraises_after_last_attempt(retry_waits):
     calls = 0
 
     @retry(attempts=2, delay=0.01, exceptions=(ConnectionError,))
@@ -35,7 +34,7 @@ async def test_retry_reraises_after_last_attempt():
     assert calls == 2
 
 
-async def test_retry_ignores_unlisted_exceptions():
+async def test_retry_ignores_unlisted_exceptions(retry_waits):
     calls = 0
 
     @retry(attempts=3, delay=0.01, exceptions=(ConnectionError,))
@@ -47,51 +46,77 @@ async def test_retry_ignores_unlisted_exceptions():
     with pytest.raises(ValueError):
         await buggy()
     assert calls == 1
+    assert retry_waits == []
 
 
-async def test_retry_backs_off_exponentially(monkeypatch):
-    sleeps: list[float] = []
-    real_sleep = asyncio.sleep
-
-    async def fake_sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-
+async def test_retry_backs_off_exponentially(retry_waits):
     @retry(attempts=4, delay=0.5, backoff=2.0, exceptions=(ConnectionError,))
     async def always_fails() -> None:
         raise ConnectionError
 
     with pytest.raises(ConnectionError):
         await always_fails()
-    assert sleeps == [0.5, 1.0, 2.0]
+    assert retry_waits == [0.5, 1.0, 2.0]
 
 
-async def test_rate_limit_spaces_out_calls():
-    starts: list[float] = []
+async def test_retry_does_not_wait_after_success(retry_waits):
+    @retry(attempts=3, delay=1.0)
+    async def works() -> int:
+        return 42
 
+    assert await works() == 42
+    assert retry_waits == []
+
+
+async def test_rate_limit_delays_calls_beyond_budget(retry_waits):
     @rate_limit(calls=2, period=0.2)
-    async def record() -> None:
-        starts.append(time.monotonic())
+    async def call() -> None: ...
 
-    await asyncio.gather(*(record() for _ in range(6)))
+    await asyncio.gather(*(call() for _ in range(6)))
 
-    starts.sort()
-    # Any 3 consecutive starts must span at least one period (2 calls allowed per period).
-    for first, third in zip(starts, starts[2:]):
-        assert third - first >= 0.2 - 0.01
-    assert starts[-1] - starts[0] >= 0.4 - 0.01
+    # 2 calls start at once, the next 2 one period later, the last 2 two periods later.
+    assert retry_waits == pytest.approx([0.2, 0.2, 0.4, 0.4], abs=0.05)
 
 
-async def test_rate_limit_does_not_delay_calls_within_budget():
+async def test_rate_limit_does_not_delay_calls_within_budget(retry_waits):
     @rate_limit(calls=5, period=10)
     async def quick() -> int:
         return 1
 
-    started = time.monotonic()
     assert sum(await asyncio.gather(*(quick() for _ in range(5)))) == 5
-    assert time.monotonic() - started < 0.1
+    assert retry_waits == []
+
+
+async def test_rate_limit_reset_restores_full_budget(retry_waits):
+    @rate_limit(calls=1, period=10)
+    async def call() -> None: ...
+
+    await call()
+    call.reset()
+    await call()
+
+    assert retry_waits == []
+
+
+async def test_rate_limit_really_spaces_calls_in_time():
+    starts: list[float] = []
+    loop = asyncio.get_running_loop()
+
+    @rate_limit(calls=2, period=0.2)
+    async def record() -> None:
+        starts.append(loop.time())
+
+    await asyncio.gather(*(record() for _ in range(4)))
+
+    assert starts[-1] - starts[0] >= 0.2 - 0.02
+
+
+def test_reset_survives_stacking_with_retry():
+    @retry()
+    @rate_limit(calls=1, period=1)
+    async def stacked() -> None: ...
+
+    assert callable(stacked.reset)
 
 
 @pytest.mark.parametrize("decorator", [retry(), rate_limit(calls=1, period=1)])

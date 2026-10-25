@@ -1,7 +1,8 @@
 """Shared fixtures: sample PEP markup and a local aiohttp server to scrape.
 
 Tests never touch the real internet; the local server reproduces the
-responses the scraper has to handle (good pages, 404s, 5xx, slow pages).
+responses the scraper has to handle (good pages, 404s, 5xx, slow pages)
+and records how many requests it was serving at the same time.
 """
 
 import asyncio
@@ -9,6 +10,9 @@ import asyncio
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+
+from pep_scraper import decorators
+from pep_scraper.fetcher import _request
 
 PAGE_DELAY = 0.3  # seconds every /pep-XXXX/ page takes to answer
 
@@ -40,6 +44,37 @@ def make_pep_html(number: int, title: str = "Sample Proposal", python_version: s
 </html>"""
 
 
+class LocalServer:
+    """URL builder for the test server plus statistics about the requests it served."""
+
+    def __init__(self) -> None:
+        self.base_url = ""
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.client_ports: set[int] = set()
+
+    def __call__(self, path: str) -> str:
+        return f"{self.base_url}{path}"
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limiter():
+    """Start every test with an empty rate-limit window so tests can't slow each other down."""
+    _request.reset()
+
+
+@pytest.fixture
+def retry_waits(monkeypatch) -> list[float]:
+    """Make decorator waits instant and record how long they would have been."""
+    waits: list[float] = []
+
+    async def record_wait(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(decorators, "sleep", record_wait)
+    return waits
+
+
 @pytest.fixture
 def pep_html() -> str:
     return make_pep_html(8, "Style Guide for Python Code")
@@ -47,11 +82,18 @@ def pep_html() -> str:
 
 @pytest.fixture
 async def pep_server():
-    """Start a local HTTP server; yields a function mapping a path to a full URL."""
+    """Start a local HTTP server and yield a ``LocalServer`` for building URLs."""
+    stats = LocalServer()
     flaky_calls = 0
 
     async def pep_page(request: web.Request) -> web.Response:
-        await asyncio.sleep(PAGE_DELAY)
+        stats.client_ports.add(request.transport.get_extra_info("peername")[1])
+        stats.in_flight += 1
+        stats.max_in_flight = max(stats.max_in_flight, stats.in_flight)
+        try:
+            await asyncio.sleep(PAGE_DELAY)
+        finally:
+            stats.in_flight -= 1
         number = int(request.match_info["number"])
         return web.Response(text=make_pep_html(number), content_type="text/html")
 
@@ -70,6 +112,11 @@ async def pep_server():
             raise web.HTTPServiceUnavailable()
         return web.Response(text=make_pep_html(1), content_type="text/html")
 
+    async def compressed(request: web.Request) -> web.Response:
+        response = web.Response(text=make_pep_html(20), content_type="text/html")
+        response.enable_compression()  # gzip, if the client says it accepts it
+        return response
+
     async def not_a_pep(request: web.Request) -> web.Response:
         return web.Response(text="<html><title>Home</title></html>", content_type="text/html")
 
@@ -78,11 +125,13 @@ async def pep_server():
     app.router.add_get("/slow", slow)
     app.router.add_get("/missing", missing)
     app.router.add_get("/flaky", flaky)
+    app.router.add_get("/compressed", compressed)
     app.router.add_get("/not-a-pep", not_a_pep)
 
     server = TestServer(app)
     await server.start_server()
+    stats.base_url = str(server.make_url("")).rstrip("/")
     try:
-        yield lambda path: str(server.make_url(path))
+        yield stats
     finally:
         await server.close()
