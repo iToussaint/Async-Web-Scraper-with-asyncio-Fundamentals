@@ -40,11 +40,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` installs the pinned dependencies and the project itself in editable mode
+(`-e .`, defined in [`pyproject.toml`](pyproject.toml)), so the `pep_scraper` package can be
+imported from anywhere while you edit the code in `src/`.
+
 ## Usage
 
 ```bash
 # asyncio basics: coroutine vs function, explicit event loop, fetch a single PEP
-python -m pep_scraper.basics
+python -m pep_scraper.core.basics
 
 # Scrape all configured PEPs -> output/peps.json
 python -m pep_scraper
@@ -78,26 +82,45 @@ back:
 ```
 
 The PEP list, timeouts, retry policy, rate limit and output location are all set in
-[`pep_scraper/config.py`](pep_scraper/config.py).
+[`src/pep_scraper/config.py`](src/pep_scraper/config.py). Output files are written to
+`output/` in the directory you run the command from.
 
 ---
 
 ## Project Structure
 
+The project uses the standard **src layout**. The package lives in `src/pep_scraper/` and is
+split into subpackages by responsibility. The tests mirror the same structure.
+
 ```text
-pep_scraper/
-├── __main__.py        # entry point: asyncio.run(...)
-├── basics.py          # coroutine vs function, explicit event loop, single-URL fetch
-├── config.py          # PEP numbers, timeouts, retry / rate-limit settings, paths
-├── decorators.py      # @retry and @rate_limit for async functions
-├── fetcher.py         # aiohttp requests, asyncio.wait_for, create_task + gather
-├── generators.py      # URL generator and async generators (stream_pages, parse_stream)
-├── parser.py          # regex extraction, map / filter transformations
-├── storage.py         # pathlib + asyncio.to_thread JSON writer
-├── scraper.py         # end-to-end async pipeline
-├── sync_scrapers.py   # sequential and threaded versions (http.client, keep-alive)
-└── benchmark.py       # performance comparison and report
-tests/                 # pytest + pytest-asyncio suite against a local aiohttp server
+.
+├── src/pep_scraper/
+│   ├── __init__.py
+│   ├── __main__.py            # python -m pep_scraper: asyncio.run(...) on the pipeline
+│   ├── config.py              # PEP numbers, timeouts, retry / rate-limit settings, paths
+│   ├── core/                  # asyncio building blocks
+│   │   ├── decorators.py      #   @retry and @rate_limit for async functions
+│   │   └── basics.py          #   coroutine vs function, explicit event loop, single-URL fetch
+│   ├── fetching/              # getting pages over HTTP
+│   │   ├── async_fetcher.py   #   aiohttp, asyncio.wait_for, create_task + gather
+│   │   └── sync_fetcher.py    #   sequential and threaded versions (http.client, keep-alive)
+│   ├── processing/            # turning pages into data
+│   │   ├── streams.py         #   URL generator and async generators (stream_pages, parse_stream)
+│   │   └── parser.py          #   regex extraction, map / filter transformations
+│   ├── storage/
+│   │   └── json_storage.py    # pathlib + asyncio.to_thread JSON writer
+│   ├── pipeline/
+│   │   └── scraper.py         # end-to-end async pipeline
+│   └── benchmark/
+│       ├── __main__.py        # python -m pep_scraper.benchmark
+│       └── runner.py          # performance comparison and report
+├── tests/                     # pytest + pytest-asyncio, mirrors src/pep_scraper/
+│   ├── conftest.py            # shared fixtures: sample pages, local aiohttp test server
+│   ├── core/  fetching/  processing/  storage/  pipeline/  benchmark/
+│   └── test_main.py
+├── pyproject.toml             # package metadata and pytest configuration
+├── requirements.txt           # pinned dependencies + editable install of the project
+└── README.md
 ```
 
 ### Pipeline
@@ -145,14 +168,14 @@ All of this happens on **one thread**. Concurrency comes from overlapping the *w
 running Python code in parallel, which is why asyncio is a great fit for I/O-bound work like
 web scraping, where almost all of the time is spent waiting for the network.
 
-`asyncio.run(main())` (in [`__main__.py`](pep_scraper/__main__.py)) creates the event loop,
+`asyncio.run(main())` (in [`__main__.py`](src/pep_scraper/__main__.py)) creates the event loop,
 runs `main()` until it finishes and then closes the loop.
-[`basics.py`](pep_scraper/basics.py) does the same steps by hand
+[`core/basics.py`](src/pep_scraper/core/basics.py) does the same steps by hand
 (`asyncio.new_event_loop()` → `loop.run_until_complete()` → `loop.close()`). It also shows that
 calling a coroutine function sends no request until the coroutine is run on the loop:
 
 ```text
-$ python -m pep_scraper.basics
+$ python -m pep_scraper.core.basics
 pep_url(8)          -> 'https://peps.python.org/pep-0008/' (already executed)
 fetch_single_pep(8) -> <coroutine object> (nothing ran yet)
 
@@ -164,16 +187,16 @@ PEP 8: Style Guide for Python Code (1.41s)
 
 | Tool | Where | Purpose |
 |------|-------|---------|
-| `asyncio.run()` | `__main__.py`, `benchmark.py` | Create the event loop and run the top-level coroutine |
-| `new_event_loop()` / `run_until_complete()` | `basics.py` | The same, done explicitly step by step |
+| `asyncio.run()` | `__main__.py`, `benchmark/runner.py` | Create the event loop and run the top-level coroutine |
+| `new_event_loop()` / `run_until_complete()` | `core/basics.py` | The same, done explicitly step by step |
 | `async def` / `await` | everywhere | Define coroutines and suspend while waiting on I/O |
-| `asyncio.create_task()` | `fetcher.fetch_all`, `generators.stream_pages` | Schedule each request on the loop immediately |
-| `asyncio.gather()` | `fetcher.fetch_all` | Wait for all tasks and return results in input order |
-| `asyncio.as_completed()` | `generators.stream_pages` | Yield results in the order they finish |
-| `asyncio.wait_for()` | `fetcher._request` | Cancel a request that exceeds the timeout |
-| `asyncio.sleep()` | `decorators` | Non-blocking waits for retry back-off and rate limiting |
-| `asyncio.to_thread()` | `storage.save_json` | Run the blocking file write without stalling the loop |
-| async generators + `async for` | `generators.py`, `scraper.py` | Process pages one by one as they arrive |
+| `asyncio.create_task()` | `async_fetcher.fetch_all`, `streams.stream_pages` | Schedule each request on the loop immediately |
+| `asyncio.gather()` | `async_fetcher.fetch_all` | Wait for all tasks and return results in input order |
+| `asyncio.as_completed()` | `streams.stream_pages` | Yield results in the order they finish |
+| `asyncio.wait_for()` | `async_fetcher._request` | Cancel a request that exceeds the timeout |
+| `asyncio.sleep()` | `core/decorators.py` | Non-blocking waits for retry back-off and rate limiting |
+| `asyncio.to_thread()` | `json_storage.save_json` | Run the blocking file write without stalling the loop |
+| async generators + `async for` | `processing/streams.py`, `pipeline/scraper.py` | Process pages one by one as they arrive |
 
 ### Decorators for async functions
 
@@ -338,5 +361,5 @@ What is covered:
 - **Sync versions:** pages, gzip decoding, HTTP errors, timeouts, connection errors, reuse of
   kept-alive connections, reconnecting once after a stale connection.
 - **Storage, pipeline and entry points:** directory creation, UTF-8 output, failure reporting,
-  `python -m pep_scraper`, `python -m pep_scraper.basics` and `python -m pep_scraper.benchmark`
+  `python -m pep_scraper`, `python -m pep_scraper.core.basics` and `python -m pep_scraper.benchmark`
   (table printed, report saved).
