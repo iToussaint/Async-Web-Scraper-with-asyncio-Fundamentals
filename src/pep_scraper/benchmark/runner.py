@@ -84,7 +84,7 @@ def format_table(report: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark async vs threaded vs sequential scraping.")
+    parser = argparse.ArgumentParser(prog="python -m pep_scraper.benchmark", description="Benchmark async vs threaded vs sequential scraping.")
     parser.add_argument("--rounds", type=int, default=3, help="number of runs per approach (default: 3)")
     args = parser.parse_args()
 
