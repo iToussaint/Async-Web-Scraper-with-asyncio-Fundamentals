@@ -46,6 +46,7 @@ def create_session() -> aiohttp.ClientSession:
 @rate_limit(calls=config.RATE_LIMIT_CALLS, period=config.RATE_LIMIT_PERIOD)
 async def _request(session: aiohttp.ClientSession, url: str, timeout: float) -> tuple[int, str]:
     """Perform one GET request; every retry attempt also passes the rate limiter."""
+    logger.info("-> request %s", url)
 
     async def get() -> tuple[int, str]:
         async with session.get(url) as response:
@@ -55,6 +56,15 @@ async def _request(session: aiohttp.ClientSession, url: str, timeout: float) -> 
 
     # wait_for cancels the request if it exceeds the timeout and raises TimeoutError.
     return await asyncio.wait_for(get(), timeout=timeout)
+
+
+def _describe_error(exc: Exception, timeout: float) -> tuple[int | None, str]:
+    """Map an exception raised by ``_request`` to (status, error message)."""
+    if isinstance(exc, TimeoutError):
+        return None, f"timed out after {timeout}s"
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status, f"HTTP {exc.status}"
+    return None, f"{type(exc).__name__}: {exc}"
 
 
 async def fetch_url(
@@ -67,24 +77,19 @@ async def fetch_url(
     Errors are captured instead of raised so one bad URL never cancels the
     other tasks running alongside it in ``asyncio.gather``.
     """
-    logger.info("-> start  %s", url)
     started = time.perf_counter()
+    status: int | None
+    html: str | None = None
     try:
-        status, html = await _request(session, url, timeout)
-    except TimeoutError:
-        result = FetchResult(url, None, None, time.perf_counter() - started, f"timed out after {timeout}s")
-    except aiohttp.ClientResponseError as exc:
-        result = FetchResult(url, exc.status, None, time.perf_counter() - started, f"HTTP {exc.status}")
-    except aiohttp.ClientError as exc:
-        result = FetchResult(url, None, None, time.perf_counter() - started, f"{type(exc).__name__}: {exc}")
+        status, page = await _request(session, url, timeout)
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        status, error = _describe_error(exc, timeout)
     else:
-        elapsed = time.perf_counter() - started
-        if status >= 400:
-            result = FetchResult(url, status, None, elapsed, f"HTTP {status}")
-        else:
-            result = FetchResult(url, status, html, elapsed)
+        error = f"HTTP {status}" if status >= 400 else None
+        html = None if error else page
 
-    logger.info("<- done   %s (%s, %.2fs)", url, result.error or result.status, result.elapsed)
+    result = FetchResult(url, status, html, time.perf_counter() - started, error)
+    logger.info("<- done    %s (%s, %.2fs)", url, result.error or result.status, result.elapsed)
     return result
 
 
