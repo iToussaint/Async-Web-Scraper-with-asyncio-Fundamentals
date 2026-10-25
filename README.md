@@ -1,5 +1,7 @@
 # Async Web Scraper with asyncio Fundamentals
 
+> **Demo video (Loom):** _add your Loom link here_
+
 An asynchronous web scraper that collects metadata from **Python Enhancement Proposals (PEPs)** on
 [peps.python.org](https://peps.python.org). It fetches 25 PEP pages concurrently with `aiohttp`,
 streams the responses through async generators, extracts each PEP's header with regular
@@ -41,6 +43,9 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
+# asyncio basics: coroutine vs function, explicit event loop, fetch a single PEP
+python -m pep_scraper.basics
+
 # Scrape all configured PEPs -> output/peps.json
 python -m pep_scraper
 
@@ -51,19 +56,25 @@ python -m pep_scraper.benchmark --rounds 3
 pytest
 ```
 
-While scraping, every request logs when it starts and finishes. All 25 `start` lines appear
-together before the first `done`, which shows that the requests run at the same time:
+While scraping, every request logs when it is actually sent (`-> request`, after the rate
+limiter lets it through) and when it finishes (`<- done`). The log shows concurrency and rate
+limiting at work. The first 20 requests (the 20 req/s budget) are all sent within 2 ms, before any
+response arrives. The remaining 5 go out one second later while earlier responses are still coming
+back:
 
 ```text
-15:02:46.593 -> start  https://peps.python.org/pep-0001/
-15:02:46.593 -> start  https://peps.python.org/pep-0008/
+16:31:25.076 -> request https://peps.python.org/pep-0001/
+16:31:25.076 -> request https://peps.python.org/pep-0008/
 ...
-15:02:46.600 -> start  https://peps.python.org/pep-3333/
-15:02:47.556 <- done   https://peps.python.org/pep-0634/ (200, 0.96s)
-15:02:47.564 <- done   https://peps.python.org/pep-0020/ (200, 0.97s)
+16:31:25.078 -> request https://peps.python.org/pep-0654/        <- 20th request, 2 ms after the 1st
+16:31:25.835 <- done    https://peps.python.org/pep-0525/ (200, 0.76s)
+16:31:25.903 <- done    https://peps.python.org/pep-0380/ (200, 0.83s)
 ...
-15:02:48.396 <- done   https://peps.python.org/pep-3333/ (200, 1.80s)
-15:02:48.410 Scraped 25/25 PEPs in 1.81s -> output/peps.json
+16:31:26.068 -> request https://peps.python.org/pep-3107/        <- rate limit: next batch 1 s later
+16:31:26.068 -> request https://peps.python.org/pep-0701/
+16:31:26.070 <- done    https://peps.python.org/pep-0498/ (200, 0.99s)
+...
+16:31:26.399 Scraped 25/25 PEPs in 1.32s -> output/peps.json
 ```
 
 The PEP list, timeouts, retry policy, rate limit and output location are all set in
@@ -76,6 +87,7 @@ The PEP list, timeouts, retry policy, rate limit and output location are all set
 ```text
 pep_scraper/
 ├── __main__.py        # entry point: asyncio.run(...)
+├── basics.py          # coroutine vs function, explicit event loop, single-URL fetch
 ├── config.py          # PEP numbers, timeouts, retry / rate-limit settings, paths
 ├── decorators.py      # @retry and @rate_limit for async functions
 ├── fetcher.py         # aiohttp requests, asyncio.wait_for, create_task + gather
@@ -83,7 +95,7 @@ pep_scraper/
 ├── parser.py          # regex extraction, map / filter transformations
 ├── storage.py         # pathlib + asyncio.to_thread JSON writer
 ├── scraper.py         # end-to-end async pipeline
-├── sync_scrapers.py   # sequential and threaded versions (urllib)
+├── sync_scrapers.py   # sequential and threaded versions (http.client, keep-alive)
 └── benchmark.py       # performance comparison and report
 tests/                 # pytest + pytest-asyncio suite against a local aiohttp server
 ```
@@ -135,12 +147,25 @@ web scraping, where almost all of the time is spent waiting for the network.
 
 `asyncio.run(main())` (in [`__main__.py`](pep_scraper/__main__.py)) creates the event loop,
 runs `main()` until it finishes and then closes the loop.
+[`basics.py`](pep_scraper/basics.py) does the same steps by hand
+(`asyncio.new_event_loop()` → `loop.run_until_complete()` → `loop.close()`). It also shows that
+calling a coroutine function sends no request until the coroutine is run on the loop:
+
+```text
+$ python -m pep_scraper.basics
+pep_url(8)          -> 'https://peps.python.org/pep-0008/' (already executed)
+fetch_single_pep(8) -> <coroutine object> (nothing ran yet)
+
+Running fetch_single_pep(8) on a new event loop...
+PEP 8: Style Guide for Python Code (1.41s)
+```
 
 ### asyncio tools used in this project
 
 | Tool | Where | Purpose |
 |------|-------|---------|
 | `asyncio.run()` | `__main__.py`, `benchmark.py` | Create the event loop and run the top-level coroutine |
+| `new_event_loop()` / `run_until_complete()` | `basics.py` | The same, done explicitly step by step |
 | `async def` / `await` | everywhere | Define coroutines and suspend while waiting on I/O |
 | `asyncio.create_task()` | `fetcher.fetch_all`, `generators.stream_pages` | Schedule each request on the loop immediately |
 | `asyncio.gather()` | `fetcher.fetch_all` | Wait for all tasks and return results in input order |
@@ -160,6 +185,7 @@ runs `main()` until it finishes and then closes the loop.
   `period` seconds (20 per second by default) so the scraper stays polite to the server.
   Every call reserves a start slot before it awaits anything. Because the event loop runs one
   coroutine at a time, that reservation can't be interrupted, so no lock is needed.
+  `reset()` clears the history so a new run starts with a full budget.
 
 Both decorators use `functools.wraps` and raise `TypeError` if they're applied to a function
 that isn't `async def`. They are stacked as `@retry` → `@rate_limit`, so every retry attempt
@@ -170,43 +196,63 @@ also passes through the rate limiter.
 ## Performance Comparison: async vs threading vs sequential
 
 All three versions do the same job: download the 25 PEP pages and parse them with the same
-regex parser.
+regex parser. To make the comparison fair, all three reuse connections (keep-alive) and request
+gzip-compressed pages, so they send the same requests and download the same bytes. The only
+difference is how they wait on the network.
 
 | Approach | Implementation | How it waits on the network |
 |----------|----------------|-----------------------------|
-| **Sequential** | `urllib` in a list comprehension | One request at a time; each request blocks until the previous one finishes |
-| **Threaded** | `urllib` + `ThreadPoolExecutor` (10 workers) | Up to 10 blocking requests at once, one OS thread each |
-| **Async** | `aiohttp` + `create_task` + `gather` | All requests in flight on a single thread; the event loop switches between them while they wait |
+| **Sequential** | `http.client`, one kept-alive connection | One request at a time; each request blocks until the previous one finishes |
+| **Threaded** | `http.client` + `ThreadPoolExecutor` (10 workers), one connection per thread | Up to 10 blocking requests at once, one OS thread each |
+| **Async** | `aiohttp` + `create_task` + `gather`, one shared `ClientSession` | All requests in flight on a single thread; the event loop switches between them while they wait |
+
+The async version also has a handicap the others don't: the `@rate_limit` decorator lets at
+most 20 requests start per second, so its 25 URLs can never finish in under ~1 s.
 
 ### Benchmark results
 
-`python -m pep_scraper.benchmark --rounds 3`. Python 3.11.9, Windows 11, 25 URLs, rate limit
-20 req/s for the async version:
+`python -m pep_scraper.benchmark --rounds 5`. Python 3.11.9, Windows 11, home internet
+connection, 25 URLs:
 
-| Approach   | Mean (s) | Best (s) | Pages parsed | Speedup vs sequential |
-|------------|---------:|---------:|-------------:|----------------------:|
-| sequential |    29.65 |    27.64 |           25 |                 1.00× |
-| threaded   |     3.84 |     3.40 |           25 |                 7.72× |
-| **async**  | **1.36** | **1.33** |       **25** |            **21.75×** |
+| Approach   | Mean (s) | Best (s) | Pages parsed (last round) | Speedup (mean) | Speedup (best) |
+|------------|---------:|---------:|--------------------------:|---------------:|---------------:|
+| sequential |    14.26 |     9.20 |                        25 |          1.00× |          1.00× |
+| threaded   |     5.98 |     1.99 |                        23 |          2.38× |          4.63× |
+| **async**  | **4.88** | **1.36** |                    **25** |      **2.92×** |      **6.78×** |
+
+Individual rounds (seconds):
+
+| Round | Sequential | Threaded | Async |
+|------:|-----------:|---------:|------:|
+| 1 | 15.65 | 9.75 | 1.36 |
+| 2 | 9.41 | 1.99 | 1.93 |
+| 3 | 9.20 | 2.12 | 2.69 |
+| 4 | 9.21 | 2.42 | 5.84 |
+| 5 | 27.82 | 13.62 | 12.58 |
 
 ### Analysis
 
 - **Sequential is slowest** because its total time is the *sum* of every request's latency
-  (about 1.2s per page here). The CPU sits idle almost the entire time, waiting on the network.
-- **Threading** overlaps the waiting across 10 OS threads, so the total time is roughly
-  `25 / 10 × latency`. It is limited by the pool size, and every thread costs memory and context
-  switches. Each `urllib` call also opens a new TLS connection.
-- **Async** has all 25 requests in flight at once on a single thread, so the total time is close
-  to the *slowest single request*. Its floor is the rate limiter (20 starts per second ⇒ at least
-  ~1.0s for 25 URLs). `aiohttp` also reuses connections through the shared `ClientSession`,
-  which avoids repeating the TLS handshake. That accounts for part of its lead over the threaded
-  `urllib` version.
-- **When to use which:** asyncio scales best for many I/O-bound tasks (hundreds of URLs cost
-  little extra). Threads are a good fit when you have to call blocking libraries. Neither helps
-  CPU-bound work in CPython; that needs `multiprocessing`.
+  (about 0.37 s per page on a good round). The CPU sits idle almost the entire time, waiting on
+  the network.
+- **Threading** overlaps the waiting across 10 OS threads, so a round takes roughly
+  `25 / 10 × latency`. It is limited by the pool size, and every thread costs memory and a
+  context switch.
+- **Async** has all requests in flight at once on one thread, so a round takes about as long as
+  the *slowest single request*, plus the rate limiter's ~1 s floor. Its best round (1.36 s) was
+  the fastest of all three approaches, despite the rate limit.
+- **The network matters as much as the code.** Round 5 hit a slowdown on the connection that
+  slowed every approach 2-3×, and in round 1 a few slow pages held the threaded version back.
+  When the bottleneck is bandwidth or a slow server, no concurrency model can beat it, so async
+  and threading end up close. That is why both the mean and the best time are reported.
+- **Reliability:** in round 5 the threaded version lost 2 pages to the 10 s timeout. The async
+  version recovered from the same conditions because `@retry` re-sends failed requests. (The sync
+  versions only exist for the comparison, so they have no retry.)
+- **When to use which:** asyncio scales best for many I/O-bound tasks; hundreds of URLs cost
+  little extra and need no extra threads. Threads are a good fit when you must call blocking
+  libraries. Neither helps CPU-bound work in CPython; that needs `multiprocessing`.
 
-Network conditions vary, so expect different absolute numbers on your machine. The ranking
-stays the same.
+Absolute numbers depend on your connection, so expect different values on your machine.
 
 ---
 
@@ -264,19 +310,33 @@ Failed URLs are listed in `failed` with their reason (for example
 pytest
 ```
 
-The suite (44 tests, `pytest` + `pytest-asyncio`) runs against a **local aiohttp test server**,
-so it needs no internet access and gives the same results every run. It covers:
+The suite (58 tests, `pytest` + `pytest-asyncio`) runs against a **local aiohttp test server**,
+so it needs no internet access. It passes on Python 3.11.9 and 3.14.8.
 
+To keep the tests stable, concurrency is not checked with timings. Instead, the test server
+counts how many requests it is handling at the same moment, which gives an exact answer:
+async = all requests in flight at once, threaded = at most the pool size, sequential = exactly 1.
+Retry back-off and rate-limit delays are recorded instead of actually slept, and every test starts
+with an empty rate-limit window.
+
+What is covered:
+
+- **asyncio basics:** a function runs immediately while a coroutine does not; the explicit
+  event loop runs to completion and is closed; single-URL fetch; the demo output.
 - **Decorators:** retry succeeds after transient failures, gives up after the last attempt,
-  ignores unlisted exceptions, backs off exponentially. Rate limiting spaces out calls and
-  doesn't delay calls within budget. Both decorators reject sync functions and preserve
-  function metadata.
-- **Fetcher:** 200 / 404 / 503-then-200 (retry) / timeout / connection-refused handling.
-  Concurrent fetching of 10 delayed pages finishes in under half the sequential time, and one
-  failure does not affect the other requests.
+  ignores unlisted exceptions, backs off exponentially (`0.5 → 1 → 2`) and doesn't wait after
+  success. Rate limiting delays calls beyond the budget, doesn't delay calls within it, and
+  `reset()` works even when stacked under `@retry`. Both decorators reject sync functions,
+  preserve metadata and validate their arguments.
+- **Fetcher:** 200 / 404 (not retried) / 503-then-200 (retried with the configured back-off,
+  3 requests logged) / timeout / connection refused. `fetch_all` runs every request at once,
+  keeps input order and isolates failures.
 - **Generators:** URL generator laziness, `stream_pages` yields in completion order,
   `parse_stream` pairs results with records.
 - **Parser:** full field extraction, missing optional fields, non-PEP pages, HTML entities,
   author email removal, sorting.
-- **Storage, pipeline, sync versions and benchmark:** directory creation, UTF-8 output,
-  failure reporting, sequential vs threaded timing, speedup calculation.
+- **Sync versions:** pages, gzip decoding, HTTP errors, timeouts, connection errors, reuse of
+  kept-alive connections, reconnecting once after a stale connection.
+- **Storage, pipeline and entry points:** directory creation, UTF-8 output, failure reporting,
+  `python -m pep_scraper`, `python -m pep_scraper.basics` and `python -m pep_scraper.benchmark`
+  (table printed, report saved).
