@@ -16,8 +16,8 @@ from functools import partial
 from types import TracebackType
 from urllib.parse import urlsplit
 
-from . import config
-from .fetcher import FetchResult
+from .. import config
+from .async_fetcher import FetchResult
 
 # A kept-alive connection may have been closed by the server between requests;
 # these errors mean "reconnect and send the request again".

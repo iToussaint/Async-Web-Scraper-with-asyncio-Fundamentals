@@ -25,7 +25,7 @@ RATE_LIMIT_PERIOD = 1.0         # ... per this many seconds
 THREAD_WORKERS = 10             # pool size for the threaded comparison
 USER_AGENT = "pep-async-scraper/1.0 (+educational asyncio lab)"
 
-# Output
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+# Output: written relative to the directory the scraper is run from.
+OUTPUT_DIR = Path.cwd() / "output"
 RESULTS_FILENAME = "peps.json"
 BENCHMARK_FILENAME = "benchmark_report.json"

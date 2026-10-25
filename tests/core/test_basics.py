@@ -1,8 +1,7 @@
 import asyncio
 
-from conftest import make_pep_html
-from pep_scraper import basics
-from pep_scraper.fetcher import FetchResult
+from pep_scraper.core import basics
+from pep_scraper.fetching.async_fetcher import FetchResult
 
 
 def test_function_runs_immediately_but_coroutine_does_not():
@@ -34,7 +33,7 @@ async def test_fetch_single_pep_from_local_server(pep_server):
 
 def test_main_prints_demo(monkeypatch, capsys):
     async def fake_fetch(number: int, base_url: str = "") -> FetchResult:
-        return FetchResult(f"u{number}", 200, make_pep_html(number, "Style Guide"), 0.25)
+        return FetchResult(f"u{number}", 200, f"<title>PEP {number} – Style Guide | peps.python.org</title>", 0.25)
 
     monkeypatch.setattr(basics, "fetch_single_pep", fake_fetch)
 

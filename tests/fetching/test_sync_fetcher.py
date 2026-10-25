@@ -1,8 +1,8 @@
 import asyncio
 import http.client
 
-from pep_scraper import sync_scrapers
-from pep_scraper.sync_scrapers import ConnectionPool, fetch_all_sequential, fetch_all_threaded, fetch_url_sync
+from pep_scraper.fetching import sync_fetcher
+from pep_scraper.fetching.sync_fetcher import ConnectionPool, fetch_all_sequential, fetch_all_threaded, fetch_url_sync
 
 # The local server runs on the test's event loop, so the blocking functions
 # are called through asyncio.to_thread to keep that loop free to answer.
@@ -75,10 +75,10 @@ def test_get_reconnects_once_when_kept_alive_socket_is_stale(monkeypatch):
             raise http.client.RemoteDisconnected("server closed idle connection")
         return 200, "<html></html>"
 
-    monkeypatch.setattr(sync_scrapers, "_send", fake_send)
+    monkeypatch.setattr(sync_fetcher, "_send", fake_send)
 
     with ConnectionPool() as pool:
-        assert sync_scrapers._get(pool, "http://example.org/pep-0008/") == (200, "<html></html>")
+        assert sync_fetcher._get(pool, "http://example.org/pep-0008/") == (200, "<html></html>")
     assert connections[0] is not connections[1]
 
 
@@ -86,7 +86,7 @@ def test_fetch_url_sync_gives_up_after_second_stale_connection(monkeypatch):
     def always_stale(connection, target):
         raise http.client.RemoteDisconnected("closed")
 
-    monkeypatch.setattr(sync_scrapers, "_send", always_stale)
+    monkeypatch.setattr(sync_fetcher, "_send", always_stale)
 
     result = fetch_url_sync("http://example.org/pep-0008/")
 

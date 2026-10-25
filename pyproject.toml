@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pep-scraper"
+dynamic = ["version"]
+description = "Async web scraper that collects metadata from Python Enhancement Proposals."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.9"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pep_scraper.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

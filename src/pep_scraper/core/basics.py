@@ -1,6 +1,6 @@
 """asyncio fundamentals: coroutine vs function, and running an event loop by hand.
 
-Run with ``python -m pep_scraper.basics``. The rest of the project uses
+Run with ``python -m pep_scraper.core.basics``. The rest of the project uses
 ``asyncio.run()``, which performs the same steps as ``run_on_new_loop``.
 """
 
@@ -9,10 +9,10 @@ import inspect
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-from . import config
-from .fetcher import FetchResult, create_session, fetch_url
-from .generators import generate_pep_urls
-from .parser import parse_pep
+from .. import config
+from ..fetching.async_fetcher import FetchResult, create_session, fetch_url
+from ..processing.parser import parse_pep
+from ..processing.streams import generate_pep_urls
 
 T = TypeVar("T")
 

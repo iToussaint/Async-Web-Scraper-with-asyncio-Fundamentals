@@ -5,8 +5,8 @@ from collections.abc import AsyncIterator, Iterable, Iterator
 
 import aiohttp
 
-from . import config
-from .fetcher import FetchResult, fetch_url
+from .. import config
+from ..fetching.async_fetcher import FetchResult, fetch_url
 from .parser import PepRecord, parse_pep
 
 

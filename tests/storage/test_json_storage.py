@@ -1,6 +1,6 @@
 import json
 
-from pep_scraper.storage import save_json
+from pep_scraper.storage.json_storage import save_json
 
 
 async def test_save_json_creates_directories_and_keeps_unicode(tmp_path):

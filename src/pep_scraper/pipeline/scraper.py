@@ -8,11 +8,11 @@ from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
-from . import config
-from .fetcher import FetchResult, create_session
-from .generators import generate_pep_urls, parse_stream, stream_pages
-from .parser import PepRecord, sort_records
-from .storage import save_json
+from .. import config
+from ..fetching.async_fetcher import FetchResult, create_session
+from ..processing.parser import PepRecord, sort_records
+from ..processing.streams import generate_pep_urls, parse_stream, stream_pages
+from ..storage.json_storage import save_json
 
 logger = logging.getLogger(__name__)
 

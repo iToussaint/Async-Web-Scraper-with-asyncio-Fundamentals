@@ -1,7 +1,4 @@
-"""Benchmark async vs threaded vs sequential scraping.
-
-Run with ``python -m pep_scraper.benchmark [--rounds N]``.
-"""
+"""Benchmark async vs threaded vs sequential scraping (``python -m pep_scraper.benchmark``)."""
 
 import argparse
 import asyncio
@@ -13,12 +10,12 @@ from datetime import datetime, timezone
 from operator import attrgetter
 from typing import Any
 
-from . import config
-from .fetcher import FetchResult, fetch_all
-from .generators import generate_pep_urls
-from .parser import PepRecord, parse_pep
-from .storage import save_json
-from .sync_scrapers import fetch_all_sequential, fetch_all_threaded
+from .. import config
+from ..fetching.async_fetcher import FetchResult, fetch_all
+from ..fetching.sync_fetcher import fetch_all_sequential, fetch_all_threaded
+from ..processing.parser import PepRecord, parse_pep
+from ..processing.streams import generate_pep_urls
+from ..storage.json_storage import save_json
 
 
 def parse_results(results: Iterable[FetchResult]) -> list[PepRecord]:

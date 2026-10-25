@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import config
+from .. import config
 
 
 def _write_json(path: Path, data: Any) -> Path:

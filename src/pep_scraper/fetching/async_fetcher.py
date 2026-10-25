@@ -8,8 +8,8 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from . import config
-from .decorators import rate_limit, retry
+from .. import config
+from ..core.decorators import rate_limit, retry
 
 logger = logging.getLogger(__name__)
 

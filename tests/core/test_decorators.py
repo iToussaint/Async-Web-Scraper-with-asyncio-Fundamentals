@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from pep_scraper.decorators import rate_limit, retry
+from pep_scraper.core.decorators import rate_limit, retry
 
 
 async def test_retry_returns_after_transient_failures(retry_waits):

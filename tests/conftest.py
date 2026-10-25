@@ -11,13 +11,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from pep_scraper import decorators
-from pep_scraper.fetcher import _request
+from pep_scraper.core import decorators
+from pep_scraper.fetching.async_fetcher import _request
 
 PAGE_DELAY = 0.3  # seconds every /pep-XXXX/ page takes to answer
 
 
-def make_pep_html(number: int, title: str = "Sample Proposal", python_version: str | None = "3.11") -> str:
+def build_pep_html(number: int, title: str = "Sample Proposal", python_version: str | None = "3.11") -> str:
     """Build markup shaped like a real peps.python.org page header."""
     version_field = (
         '<dt class="field-odd">Python-Version<span class="colon">:</span></dt>\n'
@@ -49,6 +49,7 @@ class LocalServer:
 
     def __init__(self) -> None:
         self.base_url = ""
+        self.page_delay = PAGE_DELAY
         self.in_flight = 0
         self.max_in_flight = 0
         self.client_ports: set[int] = set()
@@ -76,8 +77,14 @@ def retry_waits(monkeypatch) -> list[float]:
 
 
 @pytest.fixture
+def make_pep_html():
+    """Factory for sample PEP pages: ``make_pep_html(number, title, python_version)``."""
+    return build_pep_html
+
+
+@pytest.fixture
 def pep_html() -> str:
-    return make_pep_html(8, "Style Guide for Python Code")
+    return build_pep_html(8, "Style Guide for Python Code")
 
 
 @pytest.fixture
@@ -95,7 +102,7 @@ async def pep_server():
         finally:
             stats.in_flight -= 1
         number = int(request.match_info["number"])
-        return web.Response(text=make_pep_html(number), content_type="text/html")
+        return web.Response(text=build_pep_html(number), content_type="text/html")
 
     async def slow(request: web.Request) -> web.Response:
         await asyncio.sleep(2)
@@ -110,10 +117,10 @@ async def pep_server():
         flaky_calls += 1
         if flaky_calls < 3:
             raise web.HTTPServiceUnavailable()
-        return web.Response(text=make_pep_html(1), content_type="text/html")
+        return web.Response(text=build_pep_html(1), content_type="text/html")
 
     async def compressed(request: web.Request) -> web.Response:
-        response = web.Response(text=make_pep_html(20), content_type="text/html")
+        response = web.Response(text=build_pep_html(20), content_type="text/html")
         response.enable_compression()  # gzip, if the client says it accepts it
         return response
 

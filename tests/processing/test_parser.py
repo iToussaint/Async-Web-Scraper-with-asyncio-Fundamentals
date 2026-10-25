@@ -1,5 +1,4 @@
-from conftest import make_pep_html
-from pep_scraper.parser import clean_value, extract_fields, parse_authors, parse_pep, sort_records
+from pep_scraper.processing.parser import clean_value, extract_fields, parse_authors, parse_pep, sort_records
 
 
 def test_parse_pep_extracts_all_fields(pep_html):
@@ -17,7 +16,7 @@ def test_parse_pep_extracts_all_fields(pep_html):
     }
 
 
-def test_parse_pep_handles_missing_optional_fields():
+def test_parse_pep_handles_missing_optional_fields(make_pep_html):
     record = parse_pep(make_pep_html(20, python_version=None), "u")
 
     assert record["python_version"] is None
@@ -51,7 +50,7 @@ def test_parse_authors_drops_emails_and_blanks():
     assert parse_authors(raw) == ["Chris Angelico", "Tim Peters", "Guido van Rossum"]
 
 
-def test_sort_records_orders_by_number():
+def test_sort_records_orders_by_number(make_pep_html):
     records = [parse_pep(make_pep_html(n), "u") for n in (572, 8, 20)]
 
     assert [r["number"] for r in sort_records(records)] == [8, 20, 572]

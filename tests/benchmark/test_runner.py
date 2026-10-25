@@ -2,16 +2,17 @@ import json
 import sys
 import time
 
-from conftest import make_pep_html
-from pep_scraper import benchmark
-from pep_scraper.fetcher import FetchResult
+from pep_scraper.benchmark import runner as benchmark
+from pep_scraper.fetching.async_fetcher import FetchResult
+
+PEP_PAGE = "<title>PEP 1 – PEP Purpose and Guidelines | peps.python.org</title>"
 
 
 def fake_fetch(delay: float):
     def fetch() -> list[FetchResult]:
         time.sleep(delay)
         return [
-            FetchResult("u1", 200, make_pep_html(1), delay),
+            FetchResult("u1", 200, PEP_PAGE, delay),
             FetchResult("u2", 404, None, delay, "HTTP 404"),
         ]
 

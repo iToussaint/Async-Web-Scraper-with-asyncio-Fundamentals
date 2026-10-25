@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from .scraper import run
+from .pipeline.scraper import run
 
 
 def main() -> None:

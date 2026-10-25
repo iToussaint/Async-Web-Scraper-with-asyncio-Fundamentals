@@ -1,7 +1,7 @@
 import inspect
 
-from pep_scraper.fetcher import FetchResult, create_session
-from pep_scraper.generators import generate_pep_urls, parse_stream, stream_pages
+from pep_scraper.fetching.async_fetcher import FetchResult, create_session
+from pep_scraper.processing.streams import generate_pep_urls, parse_stream, stream_pages
 
 
 def test_generate_pep_urls_is_lazy_and_zero_padded():

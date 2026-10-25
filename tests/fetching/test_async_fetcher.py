@@ -1,8 +1,7 @@
 import logging
 
-from conftest import PAGE_DELAY
 from pep_scraper import config
-from pep_scraper.fetcher import create_session, fetch_all, fetch_url
+from pep_scraper.fetching.async_fetcher import create_session, fetch_all, fetch_url
 
 
 async def test_fetch_url_returns_page(pep_server):
@@ -12,7 +11,7 @@ async def test_fetch_url_returns_page(pep_server):
     assert result.ok
     assert result.status == 200
     assert "PEP 8" in result.html
-    assert result.elapsed >= PAGE_DELAY - 0.05
+    assert result.elapsed >= pep_server.page_delay - 0.05
 
 
 async def test_fetch_url_reports_client_errors_without_retrying(pep_server, retry_waits):
@@ -26,7 +25,7 @@ async def test_fetch_url_reports_client_errors_without_retrying(pep_server, retr
 
 
 async def test_fetch_url_retries_server_errors(pep_server, retry_waits, caplog):
-    caplog.set_level(logging.INFO, logger="pep_scraper.fetcher")
+    caplog.set_level(logging.INFO, logger="pep_scraper.fetching.async_fetcher")
 
     async with create_session() as session:
         result = await fetch_url(session, pep_server("/flaky"))

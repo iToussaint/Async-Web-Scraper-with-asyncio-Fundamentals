@@ -1,6 +1,6 @@
 import json
 
-from pep_scraper import scraper
+from pep_scraper.pipeline import scraper
 
 
 async def test_scrape_builds_report_from_local_server(pep_server):
