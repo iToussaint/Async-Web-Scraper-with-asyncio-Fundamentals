@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,8 @@ from .storage import save_json
 logger = logging.getLogger(__name__)
 
 Pair = tuple[FetchResult, PepRecord | None]
+
+record_of = itemgetter(1)
 
 
 def describe_failure(pair: Pair) -> dict[str, str]:
@@ -36,8 +39,8 @@ async def scrape(
         pairs: list[Pair] = [pair async for pair in parse_stream(stream_pages(session, urls, timeout))]
 
     elapsed = time.perf_counter() - started
-    records = sort_records(filter(None, map(lambda pair: pair[1], pairs)))
-    failures = list(map(describe_failure, filter(lambda pair: pair[1] is None, pairs)))
+    records = sort_records(filter(None, map(record_of, pairs)))
+    failures = list(map(describe_failure, filter(lambda pair: record_of(pair) is None, pairs)))
 
     return {
         "source": base_url,

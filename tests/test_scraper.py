@@ -4,7 +4,7 @@ from pep_scraper import scraper
 
 
 async def test_scrape_builds_report_from_local_server(pep_server):
-    base_url = pep_server("").rstrip("/")
+    base_url = pep_server.base_url
 
     report = await scraper.scrape(numbers=[572, 8, 20], base_url=base_url)
 
@@ -16,7 +16,7 @@ async def test_scrape_builds_report_from_local_server(pep_server):
 
 
 async def test_scrape_lists_failures(pep_server, monkeypatch):
-    base_url = pep_server("").rstrip("/")
+    base_url = pep_server.base_url
     bad_urls = iter([f"{base_url}/pep-0008/", f"{base_url}/missing", f"{base_url}/not-a-pep"])
     monkeypatch.setattr(scraper, "generate_pep_urls", lambda numbers, base: bad_urls)
 
